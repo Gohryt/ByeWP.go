@@ -15,10 +15,12 @@ import (
 type (
 	Global struct {
 		Flags struct {
-			Make    *bool
-			Ask     *bool
-			From    *int64
-			FromEnd *bool
+			Make         *bool
+			Ask          *bool
+			PostsFrom    *int64
+			PostsFromEnd *bool
+			UsersFrom    *int64
+			UsersFromEnd *bool
 		}
 		Databases struct {
 			Old gdatabase.Configuration
@@ -71,18 +73,19 @@ type (
 
 func main() {
 	var (
-		global     Global
-		err        error
-		selectLast *sql.Stmt
+		global Global
+		err    error
 	)
 
 	global.Flags.Make = flag.Bool("make", false, "make database")
 	global.Flags.Ask = flag.Bool("ask", false, "ask for short posts")
-	global.Flags.From = flag.Int64("from", 0, "start from ...")
-	global.Flags.FromEnd = flag.Bool("fromEnd", false, "start from end")
+	global.Flags.PostsFrom = flag.Int64("postsFrom", 0, "posts start from ...")
+	global.Flags.PostsFromEnd = flag.Bool("postsFromEnd", false, "posts start from end")
+	global.Flags.UsersFrom = flag.Int64("usersFrom", 0, "users start from ...")
+	global.Flags.UsersFromEnd = flag.Bool("usersFromEnd", false, "users start from end")
 	flag.Parse()
 
-	fmt.Printf("Program started with params: make = %v, ask - %v, from - %v, fromEnd - %v\n", *global.Flags.Make, *global.Flags.Ask, *global.Flags.From, *global.Flags.FromEnd)
+	fmt.Printf("Program started with params: make = %v, ask - %v, postsFrom - %v, postsFromEnd - %v, usersFrom - %v, usersFromEnd - %v\n", *global.Flags.Make, *global.Flags.Ask, *global.Flags.PostsFrom, *global.Flags.PostsFromEnd, *global.Flags.UsersFrom, *global.Flags.UsersFromEnd)
 
 	global.Databases.Old.FromFile("old.json", gmanager.CriticalHandler)
 	global.Databases.New.FromFile("new.json", gmanager.CriticalHandler)
@@ -111,23 +114,75 @@ func main() {
 		gmanager.CriticalHandler(&err)
 	}
 
-	selectLast, err = global.Connections.New.Prepare("select max(Id) from LegacyPosts")
-	gmanager.CriticalHandler(&err)
+	if *global.Flags.Make {
+		_, err = global.Connections.New.Exec("create table LegacyUsers (Id int auto_increment primary key, Username varchar(128) not null default '');")
+		gmanager.CriticalHandler(&err)
+		_, err = global.Connections.New.Exec("create table LegacyTags (Id int primary key, Tag varchar(64) not null default '');")
+		gmanager.CriticalHandler(&err)
+		_, err = global.Connections.New.Exec("create table LegacyPosts (Id int primary key, Author int not null default 0, Date bigint not null default 0, Image varchar(512) not null default '', Title varchar(256) not null default '', Content longtext not null default '', foreign key (Author) references LegacyUsers (Id));")
+		gmanager.CriticalHandler(&err)
+		_, err = global.Connections.New.Exec("create table LegacyDependencies (PostId int not null default 0, TagId int not null default 0, foreign key (PostId) references LegacyPosts (Id), foreign key (TagId) references LegacyTags (Id));")
+		gmanager.CriticalHandler(&err)
+	}
 
-	if *global.Flags.FromEnd {
+	if *global.Flags.UsersFromEnd && !*global.Flags.Make {
 		var (
-			row  *sql.Row
-			last int64
+			row     *sql.Row
+			lastSql sql.NullInt64
 		)
-		row = selectLast.QueryRow()
+		row = global.Connections.New.QueryRow("select max(Id) from LegacyUsers")
 		gmanager.CriticalHandler(&err)
 		if row != nil {
-			err = row.Scan(&last)
+			err = row.Scan(&lastSql)
 			gmanager.CriticalHandler(&err)
-			last++
-			global.Flags.From = &last
-			fmt.Printf("Last migrated post is %d, we will start from it\n", *global.Flags.From)
+			if lastSql.Valid {
+				fmt.Printf("Last migrated user is %d, we will start from it\n", lastSql.Int64)
+				lastSql.Int64++
+				global.Flags.UsersFrom = &lastSql.Int64
+			} else {
+				fmt.Printf("Migrated users were not found\n")
+				*global.Flags.UsersFrom++
+			}
+		} else {
+			err := errors.New("getting last migrated user was unsuccessful")
+			gmanager.CriticalHandler(&err)
 		}
+	} else {
+		var (
+			last int64
+		)
+		last++
+		global.Flags.UsersFrom = &last
+	}
+
+	if *global.Flags.PostsFromEnd && !*global.Flags.Make {
+		var (
+			row     *sql.Row
+			lastSql sql.NullInt64
+		)
+		row = global.Connections.New.QueryRow("select max(Id) from LegacyPosts")
+		gmanager.CriticalHandler(&err)
+		if row != nil {
+			err = row.Scan(&lastSql)
+			gmanager.CriticalHandler(&err)
+			if lastSql.Valid {
+				fmt.Printf("Last migrated post is %d, we will start from it\n", lastSql.Int64)
+				lastSql.Int64++
+				global.Flags.PostsFrom = &lastSql.Int64
+			} else {
+				fmt.Printf("Migrated posts were not found\n")
+				*global.Flags.PostsFrom++
+			}
+		} else {
+			err := errors.New("getting last migrated post was unsuccessful")
+			gmanager.CriticalHandler(&err)
+		}
+	} else {
+		var (
+			last int64
+		)
+		last++
+		global.Flags.PostsFrom = &last
 	}
 
 	err = global.Connections.Old.Close()
