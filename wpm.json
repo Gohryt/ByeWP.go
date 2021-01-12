@@ -1,0 +1,4 @@
+{
+  "String": "((http|https)(://)|)(nuancesprog\\.ru)(/|//)(wp-content)(/)",
+  "With": "https://mediabase.nuancesprog.ru/legacy/"
+}
