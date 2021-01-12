@@ -9,6 +9,7 @@ import (
 	gmanager "github.com/Gohryt/Impossible.go/manager"
 	gregexp "github.com/Gohryt/Impossible.go/regexp"
 	_ "github.com/go-sql-driver/mysql"
+	"sync"
 	"time"
 )
 
@@ -90,8 +91,9 @@ type (
 
 func main() {
 	var (
-		global Global
-		err    error
+		global    Global
+		err       error
+		waitGroup sync.WaitGroup
 	)
 
 	global.Flags.Make = flag.Bool("make", false, "make database")
@@ -110,26 +112,33 @@ func main() {
 	global.Replacers.WordPressSpacers.FromFile("wps.json", gmanager.CriticalHandler)
 	global.Replacers.WordPressMedia.FromFile("wpm.json", gmanager.CriticalHandler)
 
-	global.Connections.Old, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.Old.User, global.Databases.Old.Password, global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name))
-	gmanager.CriticalHandler(&err)
-	global.Connections.New, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.New.User, global.Databases.New.Password, global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name))
-	gmanager.CriticalHandler(&err)
-
+	waitGroup.Add(2)
 	fmt.Printf("Databases:\n")
-	if global.Connections.Old != nil {
-		fmt.Printf("Old - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name, global.Databases.Old.User, global.Databases.Old.Password)
-		global.Connections.Old.SetConnMaxLifetime(time.Second * 10)
-	} else {
-		err := errors.New("old database not connected")
+	go func() {
+		global.Connections.Old, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.Old.User, global.Databases.Old.Password, global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name))
 		gmanager.CriticalHandler(&err)
-	}
-	if global.Connections.New != nil {
-		fmt.Printf("New - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name, global.Databases.New.User, global.Databases.New.Password)
-		global.Connections.New.SetConnMaxLifetime(time.Second * 10)
-	} else {
-		err := errors.New("new database not connected")
+		if global.Connections.Old != nil {
+			fmt.Printf("Old - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name, global.Databases.Old.User, global.Databases.Old.Password)
+			global.Connections.Old.SetConnMaxLifetime(time.Second * 10)
+		} else {
+			err := errors.New("old database not connected")
+			gmanager.CriticalHandler(&err)
+		}
+		waitGroup.Done()
+	}()
+	go func() {
+		global.Connections.New, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.New.User, global.Databases.New.Password, global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name))
 		gmanager.CriticalHandler(&err)
-	}
+		if global.Connections.New != nil {
+			fmt.Printf("New - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name, global.Databases.New.User, global.Databases.New.Password)
+			global.Connections.New.SetConnMaxLifetime(time.Second * 10)
+		} else {
+			err := errors.New("new database not connected")
+			gmanager.CriticalHandler(&err)
+		}
+		waitGroup.Done()
+	}()
+	waitGroup.Wait()
 
 	if *global.Flags.Make {
 		_, err = global.Connections.New.Exec("create table LegacyUsers (Id int auto_increment primary key, Username varchar(128) not null default '');")
@@ -142,57 +151,95 @@ func main() {
 		gmanager.CriticalHandler(&err)
 	}
 
-	if *global.Flags.UsersFromEnd && !*global.Flags.Make {
-		var (
-			row     *sql.Row
-			lastSql sql.NullInt64
-		)
-		row = global.Connections.New.QueryRow("select max(Id) from LegacyUsers")
-		gmanager.CriticalHandler(&err)
-		if row != nil {
-			err = row.Scan(&lastSql)
+	waitGroup.Add(2)
+	go func() {
+		if *global.Flags.UsersFromEnd && !*global.Flags.Make {
+			var (
+				row     *sql.Row
+				lastSql sql.NullInt64
+			)
+			row = global.Connections.New.QueryRow("select max(Id) from LegacyUsers")
 			gmanager.CriticalHandler(&err)
-			if lastSql.Valid {
-				fmt.Printf("Last migrated user is %d, we will start from it\n", lastSql.Int64)
-				lastSql.Int64++
-				global.Flags.UsersFrom = &lastSql.Int64
+			if row != nil {
+				err = row.Scan(&lastSql)
+				gmanager.CriticalHandler(&err)
+				if lastSql.Valid {
+					fmt.Printf("Last migrated user is %d, we will start from it\n", lastSql.Int64)
+					lastSql.Int64++
+					global.Flags.UsersFrom = &lastSql.Int64
+				} else {
+					fmt.Printf("Migrated users were not found\n")
+					*global.Flags.UsersFrom++
+				}
 			} else {
-				fmt.Printf("Migrated users were not found\n")
-				*global.Flags.UsersFrom++
+				err := errors.New("getting last migrated user was unsuccessful")
+				gmanager.CriticalHandler(&err)
 			}
 		} else {
-			err := errors.New("getting last migrated user was unsuccessful")
-			gmanager.CriticalHandler(&err)
+			*global.Flags.UsersFrom++
 		}
-	} else {
-		*global.Flags.UsersFrom++
-	}
+		waitGroup.Done()
+	}()
+	go func() {
+		if *global.Flags.PostsFromEnd && !*global.Flags.Make {
+			var (
+				row     *sql.Row
+				lastSql sql.NullInt64
+			)
+			row = global.Connections.New.QueryRow("select max(Id) from LegacyPosts")
+			gmanager.CriticalHandler(&err)
+			if row != nil {
+				err = row.Scan(&lastSql)
+				gmanager.CriticalHandler(&err)
+				if lastSql.Valid {
+					fmt.Printf("Last migrated post is %d, we will start from it\n", lastSql.Int64)
+					lastSql.Int64++
+					global.Flags.PostsFrom = &lastSql.Int64
+				} else {
+					fmt.Printf("Migrated posts were not found\n")
+					*global.Flags.PostsFrom++
+				}
+			} else {
+				err := errors.New("getting last migrated post was unsuccessful")
+				gmanager.CriticalHandler(&err)
+			}
+		} else {
+			*global.Flags.PostsFrom++
+		}
+		waitGroup.Done()
+	}()
+	waitGroup.Wait()
 
-	if *global.Flags.PostsFromEnd && !*global.Flags.Make {
-		var (
-			row     *sql.Row
-			lastSql sql.NullInt64
-		)
-		row = global.Connections.New.QueryRow("select max(Id) from LegacyPosts")
-		gmanager.CriticalHandler(&err)
+	var (
+		maxUser sql.NullInt64
+		maxPost sql.NullInt64
+		row     *sql.Row
+	)
+
+	waitGroup.Add(2)
+	go func() {
+		row = global.Connections.Old.QueryRow("select max(ID) from wp_users")
 		if row != nil {
-			err = row.Scan(&lastSql)
+			err = row.Scan(&maxUser)
 			gmanager.CriticalHandler(&err)
-			if lastSql.Valid {
-				fmt.Printf("Last migrated post is %d, we will start from it\n", lastSql.Int64)
-				lastSql.Int64++
-				global.Flags.PostsFrom = &lastSql.Int64
-			} else {
-				fmt.Printf("Migrated posts were not found\n")
-				*global.Flags.PostsFrom++
+			if !maxUser.Valid {
+				fmt.Printf("No users found, users will not be migrated\n")
 			}
-		} else {
-			err := errors.New("getting last migrated post was unsuccessful")
-			gmanager.CriticalHandler(&err)
 		}
-	} else {
-		*global.Flags.PostsFrom++
-	}
+		waitGroup.Done()
+	}()
+	go func() {
+		row = global.Connections.Old.QueryRow("select max(ID) from wp_posts")
+		if row != nil {
+			err = row.Scan(&maxPost)
+			gmanager.CriticalHandler(&err)
+			if !maxUser.Valid {
+				fmt.Printf("No posts found, posts will not be migrated\n")
+			}
+		}
+		waitGroup.Done()
+	}()
+	waitGroup.Wait()
 
 	err = global.Connections.Old.Close()
 	gmanager.CriticalHandler(&err)
