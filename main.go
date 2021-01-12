@@ -98,9 +98,9 @@ func main() {
 
 	global.Flags.Make = flag.Bool("make", false, "make database")
 	global.Flags.Ask = flag.Bool("ask", false, "ask for short posts")
-	global.Flags.PostsFrom = flag.Int64("postsFrom", 0, "posts start from ...")
+	global.Flags.PostsFrom = flag.Int64("postsFrom", 1, "posts start from ...")
 	global.Flags.PostsFromEnd = flag.Bool("postsFromEnd", false, "posts start from end")
-	global.Flags.UsersFrom = flag.Int64("usersFrom", 0, "users start from ...")
+	global.Flags.UsersFrom = flag.Int64("usersFrom", 1, "users start from ...")
 	global.Flags.UsersFromEnd = flag.Bool("usersFromEnd", false, "users start from end")
 	flag.Parse()
 
@@ -141,7 +141,7 @@ func main() {
 	waitGroup.Wait()
 
 	if *global.Flags.Make {
-		_, err = global.Connections.New.Exec("create table LegacyUsers (Id int auto_increment primary key, Username varchar(128) not null default '');")
+		_, err = global.Connections.New.Exec("create table LegacyUsers (Id int primary key, Username varchar(128) not null default '', Email varchar(512) not null default '');")
 		gmanager.CriticalHandler(&err)
 		_, err = global.Connections.New.Exec("create table LegacyTags (Id int primary key, Tag varchar(64) not null default '');")
 		gmanager.CriticalHandler(&err)
@@ -169,14 +169,11 @@ func main() {
 					global.Flags.UsersFrom = &lastSql.Int64
 				} else {
 					fmt.Printf("Migrated users were not found\n")
-					*global.Flags.UsersFrom++
 				}
 			} else {
 				err := errors.New("getting last migrated user was unsuccessful")
 				gmanager.CriticalHandler(&err)
 			}
-		} else {
-			*global.Flags.UsersFrom++
 		}
 		waitGroup.Done()
 	}()
@@ -197,14 +194,11 @@ func main() {
 					global.Flags.PostsFrom = &lastSql.Int64
 				} else {
 					fmt.Printf("Migrated posts were not found\n")
-					*global.Flags.PostsFrom++
 				}
 			} else {
 				err := errors.New("getting last migrated post was unsuccessful")
 				gmanager.CriticalHandler(&err)
 			}
-		} else {
-			*global.Flags.PostsFrom++
 		}
 		waitGroup.Done()
 	}()
@@ -212,23 +206,40 @@ func main() {
 
 	var (
 		maxUser sql.NullInt64
-		maxPost sql.NullInt64
-		row     *sql.Row
+		//maxPost sql.NullInt64
+		row *sql.Row
 	)
 
-	waitGroup.Add(2)
-	go func() {
-		row = global.Connections.Old.QueryRow("select max(ID) from wp_users")
-		if row != nil {
-			err = row.Scan(&maxUser)
-			gmanager.CriticalHandler(&err)
-			if !maxUser.Valid {
-				fmt.Printf("No users found, users will not be migrated\n")
-			}
+	row = global.Connections.Old.QueryRow("select max(ID) from wp_users")
+	if row != nil {
+		err = row.Scan(&maxUser)
+		gmanager.CriticalHandler(&err)
+		if !maxUser.Valid {
+			fmt.Printf("No users found, users will not be migrated\n")
 		}
-		waitGroup.Done()
-	}()
-	go func() {
+	}
+	if maxUser.Valid {
+		var (
+			row     *sql.Row
+			userOld UserOld
+			userNew UserNew
+		)
+		for *global.Flags.UsersFrom <= maxUser.Int64 {
+			row = global.Connections.Old.QueryRow("select * from wp_users where ID = ?", *global.Flags.UsersFrom)
+			if row != nil {
+				if !userOld.scan(row) {
+					userNew = *userOld.new()
+					_, err = global.Connections.New.Exec("insert into LegacyUsers (Id, Username, Email) values (?, ?, ?)", userNew.Id, userNew.Username, userNew.Email)
+					gmanager.CriticalHandler(&err)
+				}
+			} else {
+				err := errors.New("getting users was unsuccessful")
+				gmanager.CriticalHandler(&err)
+			}
+			*global.Flags.UsersFrom++
+		}
+	}
+	/*
 		row = global.Connections.Old.QueryRow("select max(ID) from wp_posts")
 		if row != nil {
 			err = row.Scan(&maxPost)
@@ -237,38 +248,52 @@ func main() {
 				fmt.Printf("No posts found, posts will not be migrated\n")
 			}
 		}
-		waitGroup.Done()
-	}()
-	waitGroup.Wait()
+		if maxPost.Valid {
+			for *global.Flags.PostsFrom <= maxPost.Int64 {
+				print(*global.Flags.PostsFrom)
+				*global.Flags.PostsFrom++
+			}
+		}
+
+	*/
 
 	err = global.Connections.Old.Close()
 	gmanager.CriticalHandler(&err)
 	err = global.Connections.New.Close()
 	gmanager.CriticalHandler(&err)
+	return
 }
 
 func (un *UserNew) print() {
 	fmt.Printf("Id: %v Username: %v Email: %v\n", un.Id, un.Username, un.Email)
+	return
 }
 
-func (un *UserNew) scan(row *sql.Row) {
+func (un *UserNew) scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&un.Id,
 		&un.Username,
 		&un.Email,
 	)
-	gmanager.CriticalHandler(&err)
+	if err != sql.ErrNoRows {
+		gmanager.CriticalHandler(&err)
+	} else {
+		noRows = true
+	}
+	return
 }
 
 func (uo *UserOld) print() {
 	fmt.Printf("Id: %v Username: %v Email: %v\n", uo.ID, uo.UserNicename, uo.UserEmail)
+	return
 }
 
-func (uo *UserOld) scan(row *sql.Row) {
+func (uo *UserOld) scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&uo.ID,
 		&uo.UserLogin,
 		&uo.UserPass,
+		&uo.UserNicename,
 		&uo.UserEmail,
 		&uo.UserUrl,
 		&uo.UserRegistered,
@@ -276,22 +301,29 @@ func (uo *UserOld) scan(row *sql.Row) {
 		&uo.UserStatus,
 		&uo.DisplayName,
 	)
-	gmanager.CriticalHandler(&err)
+	if err != sql.ErrNoRows {
+		gmanager.CriticalHandler(&err)
+	} else {
+		noRows = true
+	}
+	return
 }
 
 func (uo *UserOld) new() (un *UserNew) {
-	return &UserNew{
+	un = &UserNew{
 		Id:       uo.ID,
 		Username: uo.UserNicename,
 		Email:    uo.UserEmail,
 	}
+	return
 }
 
 func (pn *PostNew) print() {
 	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nImage: %v\nContent: %v\n", pn.Id, pn.Author, time.Unix(pn.Date, 0).String(), pn.Title, pn.Image, pn.Content)
+	return
 }
 
-func (pn *PostNew) scan(row *sql.Row) {
+func (pn *PostNew) scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&pn.Id,
 		&pn.Author,
@@ -300,14 +332,20 @@ func (pn *PostNew) scan(row *sql.Row) {
 		&pn.Title,
 		&pn.Content,
 	)
-	gmanager.CriticalHandler(&err)
+	if err != sql.ErrNoRows {
+		gmanager.CriticalHandler(&err)
+	} else {
+		noRows = true
+	}
+	return
 }
 
 func (po *PostOld) print() {
 	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nContent: %v\n", po.ID, po.PostAuthor, po.PostDate.String(), po.PostTitle, po.PostContent)
+	return
 }
 
-func (po *PostOld) scan(row *sql.Row) {
+func (po *PostOld) scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&po.ID,
 		&po.PostAuthor,
@@ -333,7 +371,12 @@ func (po *PostOld) scan(row *sql.Row) {
 		&po.PostMimeType,
 		&po.CommentCount,
 	)
-	gmanager.CriticalHandler(&err)
+	if err != sql.ErrNoRows {
+		gmanager.CriticalHandler(&err)
+	} else {
+		noRows = true
+	}
+	return
 }
 
 func (po *PostOld) new(global Global) (pn *PostNew) {
@@ -343,11 +386,12 @@ func (po *PostOld) new(global Global) (pn *PostNew) {
 	global.Replacers.WordPressComment.Replace(&content)
 	global.Replacers.WordPressSpacers.Replace(&content)
 	global.Replacers.WordPressMedia.Replace(&content)
-	return &PostNew{
+	pn = &PostNew{
 		Id:      po.ID,
 		Author:  po.PostAuthor,
 		Date:    po.PostDate.Unix(),
 		Title:   po.PostTitle,
 		Content: content,
 	}
+	return
 }

@@ -10,5 +10,7 @@ github.com/Gohryt/Impossible.go v0.0.0-20210112101304-544f3eef84b5 h1:iHxv5D1HE+
 github.com/Gohryt/Impossible.go v0.0.0-20210112101304-544f3eef84b5/go.mod h1:sr8Rd0JpTYtbLSJ2B8yy5O+rU439y1dHUIWOtk64tIM=
 github.com/Gohryt/Impossible.go v0.0.0-20210112103021-d591147b55de h1:FABOqdxqjJKwS4jQrDXyHgiUWrMAN/955OosWhxr+pA=
 github.com/Gohryt/Impossible.go v0.0.0-20210112103021-d591147b55de/go.mod h1:sr8Rd0JpTYtbLSJ2B8yy5O+rU439y1dHUIWOtk64tIM=
+github.com/Gohryt/Impossible.go v0.0.0-20210112140419-200c757711c3 h1:ixajpxncG+Jbs9HTCF/HDdMjqgTQHROa85KatY4qjhk=
+github.com/Gohryt/Impossible.go v0.0.0-20210112140419-200c757711c3/go.mod h1:sr8Rd0JpTYtbLSJ2B8yy5O+rU439y1dHUIWOtk64tIM=
 github.com/go-sql-driver/mysql v1.5.0 h1:ozyZYNQW3x3HtqT1jira07DN2PArx2v7/mN66gGcHOs=
 github.com/go-sql-driver/mysql v1.5.0/go.mod h1:DCzpHaOWr8IXmIStZouvnhqoel9Qv2LBy8hT2VhHyBg=
