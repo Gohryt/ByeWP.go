@@ -36,6 +36,23 @@ type (
 			WordPressMedia   gregexp.Expression
 		}
 	}
+	UserNew struct {
+		Id       int64
+		Username string
+		Email    string
+	}
+	UserOld struct {
+		ID                int64
+		UserLogin         string
+		UserPass          string
+		UserNicename      string
+		UserEmail         string
+		UserUrl           string
+		UserRegistered    time.Time
+		UserActivationKey string
+		UserStatus        int64
+		DisplayName       string
+	}
 	PostNew struct {
 		Id      int64
 		Author  int64
@@ -148,11 +165,7 @@ func main() {
 			gmanager.CriticalHandler(&err)
 		}
 	} else {
-		var (
-			last int64
-		)
-		last++
-		global.Flags.UsersFrom = &last
+		*global.Flags.UsersFrom++
 	}
 
 	if *global.Flags.PostsFromEnd && !*global.Flags.Make {
@@ -178,17 +191,53 @@ func main() {
 			gmanager.CriticalHandler(&err)
 		}
 	} else {
-		var (
-			last int64
-		)
-		last++
-		global.Flags.PostsFrom = &last
+		*global.Flags.PostsFrom++
 	}
 
 	err = global.Connections.Old.Close()
 	gmanager.CriticalHandler(&err)
 	err = global.Connections.New.Close()
 	gmanager.CriticalHandler(&err)
+}
+
+func (un *UserNew) print() {
+	fmt.Printf("Id: %v Username: %v Email: %v\n", un.Id, un.Username, un.Email)
+}
+
+func (un *UserNew) scan(row *sql.Row) {
+	err := row.Scan(
+		&un.Id,
+		&un.Username,
+		&un.Email,
+	)
+	gmanager.CriticalHandler(&err)
+}
+
+func (uo *UserOld) print() {
+	fmt.Printf("Id: %v Username: %v Email: %v\n", uo.ID, uo.UserNicename, uo.UserEmail)
+}
+
+func (uo *UserOld) scan(row *sql.Row) {
+	err := row.Scan(
+		&uo.ID,
+		&uo.UserLogin,
+		&uo.UserPass,
+		&uo.UserEmail,
+		&uo.UserUrl,
+		&uo.UserRegistered,
+		&uo.UserActivationKey,
+		&uo.UserStatus,
+		&uo.DisplayName,
+	)
+	gmanager.CriticalHandler(&err)
+}
+
+func (uo *UserOld) new() (un *UserNew) {
+	return &UserNew{
+		Id:       uo.ID,
+		Username: uo.UserNicename,
+		Email:    uo.UserEmail,
+	}
 }
 
 func (pn *PostNew) print() {
@@ -208,7 +257,7 @@ func (pn *PostNew) scan(row *sql.Row) {
 }
 
 func (po *PostOld) print() {
-	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nContent: %v\n\n", po.ID, po.PostAuthor, po.PostDate.String(), po.PostTitle, po.PostContent)
+	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nContent: %v\n", po.ID, po.PostAuthor, po.PostDate.String(), po.PostTitle, po.PostContent)
 }
 
 func (po *PostOld) scan(row *sql.Row) {
