@@ -5,16 +5,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"sync"
+	"time"
+
 	gdatabase "github.com/Gohryt/Impossible.go/database"
 	gmanager "github.com/Gohryt/Impossible.go/manager"
 	gregexp "github.com/Gohryt/Impossible.go/regexp"
 	_ "github.com/go-sql-driver/mysql"
-	"sync"
-	"time"
 )
 
 type (
-	Global struct {
+	global struct {
 		Flags struct {
 			Make         *bool
 			Ask          *bool
@@ -37,32 +38,32 @@ type (
 			WordPressMedia   gregexp.Expression
 		}
 	}
-	UserNew struct {
-		Id       int64
+	userNew struct {
+		ID       int64
 		Username string
 		Email    string
 	}
-	UserOld struct {
+	userOld struct {
 		ID                int64
 		UserLogin         string
 		UserPass          string
 		UserNicename      string
 		UserEmail         string
-		UserUrl           string
+		UserURL           string
 		UserRegistered    time.Time
 		UserActivationKey string
 		UserStatus        int64
 		DisplayName       string
 	}
-	PostNew struct {
-		Id      int64
+	postNew struct {
+		ID      int64
 		Author  int64
 		Date    int64
 		Title   string
 		Image   string
 		Content string
 	}
-	PostOld struct {
+	postOld struct {
 		ID                  int64
 		PostAuthor          int64
 		PostDate            time.Time
@@ -81,7 +82,7 @@ type (
 		PostModifiedGmt     time.Time
 		PostContentFiltered string
 		PostParent          int64
-		Guid                string
+		GUID                string
 		MenuOrder           int64
 		PostType            string
 		PostMimeType        string
@@ -91,7 +92,7 @@ type (
 
 func main() {
 	var (
-		global    Global
+		global    global
 		err       error
 		waitGroup sync.WaitGroup
 	)
@@ -145,7 +146,7 @@ func main() {
 		gmanager.CriticalHandler(&err)
 		_, err = global.Connections.New.Exec("create table LegacyTags (Id int primary key, Tag varchar(64) not null default '');")
 		gmanager.CriticalHandler(&err)
-		_, err = global.Connections.New.Exec("create table LegacyPosts (Id int primary key, Author int not null default 0, Date bigint not null default 0, Image varchar(512) not null default '', Title varchar(256) not null default '', Content longtext not null default '', foreign key (Author) references LegacyUsers (Id));")
+		_, err = global.Connections.New.Exec("create table LegacyPosts (Id int primary key, Author int not null default 0, Date bigint not null default 0, Title varchar(256) not null default '', Image varchar(512) not null default '', Content longtext not null default '', foreign key (Author) references LegacyUsers (Id));")
 		gmanager.CriticalHandler(&err)
 		_, err = global.Connections.New.Exec("create table LegacyDependencies (PostId int not null default 0, TagId int not null default 0, foreign key (PostId) references LegacyPosts (Id), foreign key (TagId) references LegacyTags (Id));")
 		gmanager.CriticalHandler(&err)
@@ -156,17 +157,17 @@ func main() {
 		if *global.Flags.UsersFromEnd && !*global.Flags.Make {
 			var (
 				row     *sql.Row
-				lastSql sql.NullInt64
+				lastSQL sql.NullInt64
 			)
 			row = global.Connections.New.QueryRow("select max(Id) from LegacyUsers")
 			gmanager.CriticalHandler(&err)
 			if row != nil {
-				err = row.Scan(&lastSql)
+				err = row.Scan(&lastSQL)
 				gmanager.CriticalHandler(&err)
-				if lastSql.Valid {
-					fmt.Printf("Last migrated user is %d, we will start from it\n", lastSql.Int64)
-					lastSql.Int64++
-					global.Flags.UsersFrom = &lastSql.Int64
+				if lastSQL.Valid {
+					fmt.Printf("Last migrated user is %d, we will start from it\n", lastSQL.Int64)
+					lastSQL.Int64++
+					global.Flags.UsersFrom = &lastSQL.Int64
 				} else {
 					fmt.Printf("Migrated users were not found\n")
 				}
@@ -181,17 +182,17 @@ func main() {
 		if *global.Flags.PostsFromEnd && !*global.Flags.Make {
 			var (
 				row     *sql.Row
-				lastSql sql.NullInt64
+				lastSQL sql.NullInt64
 			)
 			row = global.Connections.New.QueryRow("select max(Id) from LegacyPosts")
 			gmanager.CriticalHandler(&err)
 			if row != nil {
-				err = row.Scan(&lastSql)
+				err = row.Scan(&lastSQL)
 				gmanager.CriticalHandler(&err)
-				if lastSql.Valid {
-					fmt.Printf("Last migrated post is %d, we will start from it\n", lastSql.Int64)
-					lastSql.Int64++
-					global.Flags.PostsFrom = &lastSql.Int64
+				if lastSQL.Valid {
+					fmt.Printf("Last migrated post is %d, we will start from it\n", lastSQL.Int64)
+					lastSQL.Int64++
+					global.Flags.PostsFrom = &lastSQL.Int64
 				} else {
 					fmt.Printf("Migrated posts were not found\n")
 				}
@@ -206,8 +207,8 @@ func main() {
 
 	var (
 		maxUser sql.NullInt64
-		//maxPost sql.NullInt64
-		row *sql.Row
+		maxPost sql.NullInt64
+		row     *sql.Row
 	)
 
 	row = global.Connections.Old.QueryRow("select max(ID) from wp_users")
@@ -221,15 +222,15 @@ func main() {
 	if maxUser.Valid {
 		var (
 			row     *sql.Row
-			userOld UserOld
-			userNew UserNew
+			userOld userOld
+			userNew userNew
 		)
 		for *global.Flags.UsersFrom <= maxUser.Int64 {
 			row = global.Connections.Old.QueryRow("select * from wp_users where ID = ?", *global.Flags.UsersFrom)
 			if row != nil {
-				if !userOld.scan(row) {
-					userNew = *userOld.new()
-					_, err = global.Connections.New.Exec("insert into LegacyUsers (Id, Username, Email) values (?, ?, ?)", userNew.Id, userNew.Username, userNew.Email)
+				if !userOld.Scan(row) {
+					userNew = *userOld.New()
+					_, err = global.Connections.New.Exec("insert into LegacyUsers (Id, Username, Email) values (?, ?, ?)", userNew.ID, userNew.Username, userNew.Email)
 					gmanager.CriticalHandler(&err)
 				}
 			} else {
@@ -239,23 +240,167 @@ func main() {
 			*global.Flags.UsersFrom++
 		}
 	}
-	/*
-		row = global.Connections.Old.QueryRow("select max(ID) from wp_posts")
-		if row != nil {
-			err = row.Scan(&maxPost)
-			gmanager.CriticalHandler(&err)
-			if !maxUser.Valid {
-				fmt.Printf("No posts found, posts will not be migrated\n")
-			}
+	row = global.Connections.Old.QueryRow("select max(ID) from wp_posts")
+	if row != nil {
+		err = row.Scan(&maxPost)
+		gmanager.CriticalHandler(&err)
+		if !maxUser.Valid {
+			fmt.Printf("No posts found, posts will not be migrated\n")
 		}
-		if maxPost.Valid {
-			for *global.Flags.PostsFrom <= maxPost.Int64 {
-				print(*global.Flags.PostsFrom)
-				*global.Flags.PostsFrom++
+	}
+	if maxPost.Valid {
+		var (
+			row            *sql.Row
+			rows           *sql.Rows
+			postOld        postOld
+			postNew        postNew
+			ask            bool
+			scan           string
+			add            bool
+			termID         int
+			isIt           *sql.Rows
+			newID          int
+			termName       *sql.Row
+			termNameString string
+			termType       *sql.Row
+			termTaxonomy   string
+			newImage       string
+		)
+		for *global.Flags.PostsFrom <= maxPost.Int64 {
+			ask = false
+			scan = ""
+			add = true
+			row = global.Connections.Old.QueryRow("select * from wp_posts where ID = ?", *global.Flags.PostsFrom)
+			if row != nil {
+				if !postOld.Scan(row) {
+					if postOld.PostType != "post" && postOld.PostType != "revision" && postOld.PostType != "attachment" {
+						add = false
+					} else if len(postOld.PostContent) < 2048 && postOld.PostType != "attachment" {
+						ask = true
+					}
+					if ask && add {
+						postOld.Print()
+						fmt.Printf("Do you want add this post (y|yes||n|no) ? ")
+						_, err = fmt.Scan(&scan)
+						if !(scan == "y" || scan == "yes") {
+							add = false
+						}
+						gmanager.CriticalHandler(&err)
+					}
+					if add {
+						switch postOld.PostType {
+						case "post":
+							postNew = *postOld.New(&global)
+							_, err = global.Connections.New.Exec("insert into LegacyPosts (Id, Author, Date, Title, Content) values (?, ?, ?, ?, ?)", postNew.ID, postNew.Author, postNew.Date, postNew.Title, postNew.Content)
+							gmanager.CriticalHandler(&err)
+							rows, err = global.Connections.Old.Query("select term_taxonomy_id from wp_term_relationships where object_id = ?", postNew.ID)
+							gmanager.CriticalHandler(&err)
+							if rows != nil {
+								for rows.Next() {
+									termID = 0
+									isIt = nil
+									err = rows.Scan(&termID)
+									gmanager.CriticalHandler(&err)
+									isIt, err = global.Connections.New.Query("select Id from LegacyTags where Id = ?", termID)
+									gmanager.CriticalHandler(&err)
+									if isIt != nil {
+										newID = 0
+										for isIt.Next() {
+											err = isIt.Scan(&newID)
+											gmanager.CriticalHandler(&err)
+										}
+										if newID == 0 {
+											termType = global.Connections.Old.QueryRow("select taxonomy from wp_term_taxonomy where term_id = ?", termID)
+											termTaxonomy = ""
+											err = termType.Scan(&termTaxonomy)
+											gmanager.CriticalHandler(&err)
+											if termTaxonomy == "post_tag" {
+												termName = global.Connections.Old.QueryRow("select name from wp_terms where term_id = ?", termID)
+												termNameString = ""
+												err = termName.Scan(&termNameString)
+												gmanager.CriticalHandler(&err)
+												_, err = global.Connections.New.Exec("insert into LegacyTags (Id, Tag) values (?, ?)", termID, termNameString)
+												gmanager.CriticalHandler(&err)
+												_, err = global.Connections.New.Exec("insert into LegacyDependencies (PostId, TagId) values (?, ?)", postNew.ID, termID)
+												gmanager.CriticalHandler(&err)
+											}
+										} else {
+											termType = global.Connections.Old.QueryRow("select taxonomy from wp_term_taxonomy where term_id = ?", termID)
+											termTaxonomy = ""
+											err = termType.Scan(&termTaxonomy)
+											gmanager.CriticalHandler(&err)
+											if termTaxonomy == "post_tag" {
+												_, err = global.Connections.New.Exec("insert into LegacyDependencies (PostId, TagId) values (?, ?)", postNew.ID, termID)
+												gmanager.CriticalHandler(&err)
+											}
+										}
+									}
+								}
+							}
+						case "revision":
+							postNew = *postOld.New(&global)
+							_, err = global.Connections.New.Exec("update LegacyPosts set Title = ?, Content = ? where Id = ?", postNew.Title, postNew.Content, postOld.PostParent)
+							gmanager.CriticalHandler(&err)
+							rows, err = global.Connections.Old.Query("select term_taxonomy_id from wp_term_relationships where object_id = ?", postNew.ID)
+							gmanager.CriticalHandler(&err)
+							if rows != nil {
+								for rows.Next() {
+									termID = 0
+									err = rows.Scan(&termID)
+									gmanager.CriticalHandler(&err)
+									isIt, err = global.Connections.New.Query("select Id from LegacyTags where Id = ?", termID)
+									gmanager.CriticalHandler(&err)
+									if isIt != nil {
+										newID = 0
+										for isIt.Next() {
+											err = isIt.Scan(&newID)
+											gmanager.CriticalHandler(&err)
+										}
+										if newID == 0 {
+											termType = global.Connections.Old.QueryRow("select taxonomy from wp_term_taxonomy where term_id = ?", termID)
+											termTaxonomy = ""
+											err = termType.Scan(&termTaxonomy)
+											gmanager.CriticalHandler(&err)
+											if termTaxonomy == "post_tag" {
+												termName = global.Connections.Old.QueryRow("select name from wp_terms where term_id = ?", termID)
+												termNameString = ""
+												err = termName.Scan(&termNameString)
+												gmanager.CriticalHandler(&err)
+												_, err = global.Connections.New.Exec("insert into LegacyTags (Id, Tag) values (?, ?)", termID, termNameString)
+												gmanager.CriticalHandler(&err)
+												_, err = global.Connections.New.Exec("insert into LegacyDependencies (PostId, TagId) values (?, ?)", postNew.ID, termID)
+												gmanager.CriticalHandler(&err)
+											}
+										} else {
+											termType = global.Connections.Old.QueryRow("select taxonomy from wp_term_taxonomy where term_id = ?", termID)
+											termTaxonomy = ""
+											err = termType.Scan(&termTaxonomy)
+											gmanager.CriticalHandler(&err)
+											if termTaxonomy == "post_tag" {
+												_, err = global.Connections.New.Exec("insert into LegacyDependencies (PostId, TagId) values (?, ?)", postNew.ID, termID)
+												gmanager.CriticalHandler(&err)
+											}
+										}
+									}
+								}
+							}
+						case "attachment":
+							if postOld.GUID != "" {
+								newImage = postOld.GUID
+								global.Replacers.WordPressMedia.Replace(&newImage)
+								_, err = global.Connections.New.Exec("update LegacyPosts set Image = ? where Id = ?", newImage, postOld.PostParent)
+								gmanager.CriticalHandler(&err)
+							}
+						}
+					}
+				}
+			} else {
+				err := errors.New("getting users was unsuccessful")
+				gmanager.CriticalHandler(&err)
 			}
+			*global.Flags.PostsFrom++
 		}
-
-	*/
+	}
 
 	err = global.Connections.Old.Close()
 	gmanager.CriticalHandler(&err)
@@ -264,14 +409,14 @@ func main() {
 	return
 }
 
-func (un *UserNew) print() {
-	fmt.Printf("Id: %v Username: %v Email: %v\n", un.Id, un.Username, un.Email)
+func (un *userNew) Print() {
+	fmt.Printf("Id: %v Username: %v Email: %v\n", un.ID, un.Username, un.Email)
 	return
 }
 
-func (un *UserNew) scan(row *sql.Row) (noRows bool) {
+func (un *userNew) Scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
-		&un.Id,
+		&un.ID,
 		&un.Username,
 		&un.Email,
 	)
@@ -283,19 +428,19 @@ func (un *UserNew) scan(row *sql.Row) (noRows bool) {
 	return
 }
 
-func (uo *UserOld) print() {
+func (uo *userOld) Print() {
 	fmt.Printf("Id: %v Username: %v Email: %v\n", uo.ID, uo.UserNicename, uo.UserEmail)
 	return
 }
 
-func (uo *UserOld) scan(row *sql.Row) (noRows bool) {
+func (uo *userOld) Scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&uo.ID,
 		&uo.UserLogin,
 		&uo.UserPass,
 		&uo.UserNicename,
 		&uo.UserEmail,
-		&uo.UserUrl,
+		&uo.UserURL,
 		&uo.UserRegistered,
 		&uo.UserActivationKey,
 		&uo.UserStatus,
@@ -309,23 +454,23 @@ func (uo *UserOld) scan(row *sql.Row) (noRows bool) {
 	return
 }
 
-func (uo *UserOld) new() (un *UserNew) {
-	un = &UserNew{
-		Id:       uo.ID,
+func (uo *userOld) New() (un *userNew) {
+	un = &userNew{
+		ID:       uo.ID,
 		Username: uo.UserNicename,
 		Email:    uo.UserEmail,
 	}
 	return
 }
 
-func (pn *PostNew) print() {
-	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nImage: %v\nContent: %v\n", pn.Id, pn.Author, time.Unix(pn.Date, 0).String(), pn.Title, pn.Image, pn.Content)
+func (pn *postNew) Print() {
+	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nImage: %v\nContent: %v\n", pn.ID, pn.Author, time.Unix(pn.Date, 0).String(), pn.Title, pn.Image, pn.Content)
 	return
 }
 
-func (pn *PostNew) scan(row *sql.Row) (noRows bool) {
+func (pn *postNew) Scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
-		&pn.Id,
+		&pn.ID,
 		&pn.Author,
 		&pn.Date,
 		&pn.Image,
@@ -340,12 +485,12 @@ func (pn *PostNew) scan(row *sql.Row) (noRows bool) {
 	return
 }
 
-func (po *PostOld) print() {
-	fmt.Printf("Id: %v Author: %v Date: %v\nTitle: %v\nContent: %v\n", po.ID, po.PostAuthor, po.PostDate.String(), po.PostTitle, po.PostContent)
+func (po *postOld) Print() {
+	fmt.Printf("Id: %v Author: %v Date: %v Type: %v\nTitle: %v\nContent: %v\n", po.ID, po.PostAuthor, po.PostDate.String(), po.PostType, po.PostTitle, po.PostContent)
 	return
 }
 
-func (po *PostOld) scan(row *sql.Row) (noRows bool) {
+func (po *postOld) Scan(row *sql.Row) (noRows bool) {
 	err := row.Scan(
 		&po.ID,
 		&po.PostAuthor,
@@ -365,7 +510,7 @@ func (po *PostOld) scan(row *sql.Row) (noRows bool) {
 		&po.PostModifiedGmt,
 		&po.PostContentFiltered,
 		&po.PostParent,
-		&po.Guid,
+		&po.GUID,
 		&po.MenuOrder,
 		&po.PostType,
 		&po.PostMimeType,
@@ -379,15 +524,15 @@ func (po *PostOld) scan(row *sql.Row) (noRows bool) {
 	return
 }
 
-func (po *PostOld) new(global Global) (pn *PostNew) {
+func (po *postOld) New(global *global) (pn *postNew) {
 	var (
 		content = po.PostContent
 	)
 	global.Replacers.WordPressComment.Replace(&content)
 	global.Replacers.WordPressSpacers.Replace(&content)
 	global.Replacers.WordPressMedia.Replace(&content)
-	pn = &PostNew{
-		Id:      po.ID,
+	pn = &postNew{
+		ID:      po.ID,
 		Author:  po.PostAuthor,
 		Date:    po.PostDate.Unix(),
 		Title:   po.PostTitle,
