@@ -117,9 +117,9 @@ func main() {
 	fmt.Printf("Databases:\n")
 	go func() {
 		global.Connections.Old, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.Old.User, global.Databases.Old.Password, global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name))
-		gmanager.CriticalHandler(&err)
+		gmanager.StandardHandler(&err)
 		if global.Connections.Old != nil {
-			fmt.Printf("Old - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name, global.Databases.Old.User, global.Databases.Old.Password)
+			fmt.Printf("Old - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name, global.Databases.Old.User, hidePassword(global.Databases.Old.Password))
 			global.Connections.Old.SetConnMaxLifetime(time.Second * 10)
 		} else {
 			err := errors.New("old database not connected")
@@ -129,9 +129,9 @@ func main() {
 	}()
 	go func() {
 		global.Connections.New, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.New.User, global.Databases.New.Password, global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name))
-		gmanager.CriticalHandler(&err)
+		gmanager.StandardHandler(&err)
 		if global.Connections.New != nil {
-			fmt.Printf("New - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name, global.Databases.New.User, global.Databases.New.Password)
+			fmt.Printf("New - Address: %v:%v Table: %v User: %v Password: %v\n", global.Databases.New.Host, global.Databases.New.Port, global.Databases.New.Name, global.Databases.New.User, hidePassword(global.Databases.New.Password))
 			global.Connections.New.SetConnMaxLifetime(time.Second * 10)
 		} else {
 			err := errors.New("new database not connected")
@@ -539,4 +539,17 @@ func (po *postOld) New(global *global) (pn *postNew) {
 		Content: content,
 	}
 	return
+}
+
+func hidePassword(password string) string {
+	var (
+		i            int
+		bytePassword []byte = []byte(password)
+	)
+	for i = range bytePassword {
+		if i != 0 && i != (len(bytePassword)-1) {
+			bytePassword[i] = '*'
+		}
+	}
+	return string(bytePassword)
 }
