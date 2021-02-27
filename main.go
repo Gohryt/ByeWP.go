@@ -114,7 +114,6 @@ func main() {
 	global.Replacers.WordPressMedia.FromFile("wpm.json", gmanager.CriticalHandler)
 
 	fmt.Printf("Databases:\n")
-
 	global.Connections.Old, err = sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true", global.Databases.Old.User, global.Databases.Old.Password, global.Databases.Old.Host, global.Databases.Old.Port, global.Databases.Old.Name))
 	gmanager.StandardHandler(&err)
 	if global.Connections.Old != nil {
